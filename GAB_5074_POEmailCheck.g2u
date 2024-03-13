@@ -1,0 +1,73 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+	'Check GlobalCommon.Courier_EmailHist for Purchase Order emails to flag them as confirmed in the Standard PO Dashboard
+	
+	F.Intrinsic.Control.Try
+	V.Local.sError.Declare
+
+	V.Local.iCnt.Declare
+	V.Local.sPOs.Declare
+	V.Local.sSQL.Declare
+	V.Local.sPO.Declare
+	V.Local.sExp.Declare
+	V.Local.sSelect.Declare
+	
+	'Open GlobalCommon DB Connection
+	F.ODBC.Connection!conC.OpenCommonConnection(500)
+	
+	'Open Company Code DB Connections
+	F.ODBC.Connection!con.OpenCompanyConnection(500)
+	
+	'Query emailed POs
+	F.Data.DataTable.CreateFromSQL("dtEmails","conC","Select Replace(CallingPrgm,'Email PO-','') As PO From Courier_EmailHist Where CallingPrgm Like 'Email PO-%';",True)
+	'If there are no emails exit the program
+	F.Intrinsic.Control.If(V.DataTable.dtEmails.RowCount,<>,0)
+		'Loop through POs and create a string of selected POs
+		F.Intrinsic.Control.For(V.Local.iCnt,0,V.DataTable.dtEmails.RowCount--,1)
+			F.Intrinsic.Control.If(V.Local.iCnt,=,0)
+				F.Intrinsic.String.Build("'{0}'",V.DataTable.dtEmails(V.Local.iCnt).PO!FieldValTrim,V.Local.sPOs)
+			F.Intrinsic.Control.Else
+				F.Intrinsic.String.Build("{0},'{1}'",V.Local.sPOs,V.DataTable.dtEmails(V.Local.iCnt).PO!FieldValTrim,V.Local.sPOs)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iCnt)
+		
+		'Query GAB_PO_CONFCHK for POs that are not in the table; if there is a record we need to leave it alone even if the PO is unconfirmed
+		F.Intrinsic.String.Build("Select * From GAB_PO_Confchk Where Purchase_Order In ({0});",V.Local.sPOs,V.Local.sSQL)
+		F.Data.DataTable.CreateFromSQL("dtConf","con",V.Local.sSQL,True)
+		'Clone datatable to save new records only
+		F.Data.DataTable.Clone("dtConf","dtConfSave",True)
+		'Loop through POs individually
+		F.Intrinsic.String.Split(V.Local.sPOs,",",V.Local.sPOs)
+		F.Intrinsic.Control.For(V.Local.iCnt,0,V.Local.sPOs.UBound,1)
+			F.Intrinsic.String.Replace(V.Local.sPOs(V.Local.iCnt),"'","",V.Local.sPO)
+			'Check dtConf to see if record exists, if not then add PO record to Save datatable (Clone)
+			F.Intrinsic.String.Build("Purchase_Order = '{0}'",V.Local.sPO,V.Local.sExp)
+			F.Data.DataTable.Select("dtConf",V.Local.sExp,V.Local.sSelect)
+			F.Intrinsic.Control.If(V.Local.sSelect,=,"***NORETURN***")
+				F.Data.DataTable.AddRow("dtConfSave","Purchase_Order",V.Local.sPO,"Conf",1,"GS_User",V.Caller.User,"Date_Conf",V.Ambient.Date)
+			F.Intrinsic.Control.EndIf
+		F.Intrinsic.Control.Next(V.Local.iCnt)
+		'Save new records to GAB_PO_CONFCHK
+		F.Data.DataTable.SaveToDB("dtConfSave","con","GAB_PO_CONFCHK","Purchase_Order")
+		'Close DataTables
+		F.Data.DataTable.Close("dtConf")
+		F.Data.DataTable.Close("dtConfSave")
+	F.Intrinsic.Control.EndIf
+	
+	'Close DataTable
+	F.Data.DataTable.Close("dtEmails")
+	
+	'Close GlobalCommon DB Connection
+	F.ODBC.Connection!conC.Close
+	
+	'Close Company Code DB Connections
+	F.ODBC.Connection!con.Close
+
+	F.Intrinsic.Control.Catch
+		F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+		F.Intrinsic.UI.Msgbox(V.Local.sError)
+		F.Intrinsic.Control.End 
+	F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
